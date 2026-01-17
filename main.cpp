@@ -1,7 +1,5 @@
 // Compile with:
 // g++ main.cpp -o rubiks -lSDL2 -lGL -lGLEW
-// Needs glm/, stb_image.h, and textures/ folder.
-
 #include <GL/glew.h>
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_opengl.h>
@@ -26,7 +24,6 @@ const int WINDOW_WIDTH = 1024;
 const int WINDOW_HEIGHT = 768;
 const int MIN_DRAG_DISTANCE = 20;
 
-// Colors
 const glm::vec4 WHITE  = {1.0f, 1.0f, 1.0f, 1.0f};
 const glm::vec4 YELLOW = {1.0f, 0.95f, 0.0f, 1.0f};
 const glm::vec4 RED    = {1.0f, 0.0f, 0.0f, 1.0f};
@@ -34,6 +31,14 @@ const glm::vec4 ORANGE = {1.0f, 0.6f, 0.0f, 1.0f};
 const glm::vec4 GREEN  = {0.0f, 1.0f, 0.0f, 1.0f};
 const glm::vec4 BLUE   = {0.0f, 0.2f, 1.0f, 1.0f};
 const glm::vec4 BLACK_PLASTIC = {0.05f, 0.05f, 0.05f, 1.0f};
+
+enum MoveType { 
+    MOVE_F, MOVE_F_PRIME, MOVE_B, MOVE_B_PRIME, 
+    MOVE_L, MOVE_L_PRIME, MOVE_R, MOVE_R_PRIME, 
+    MOVE_U, MOVE_U_PRIME, MOVE_D, MOVE_D_PRIME, 
+    MOVE_M, MOVE_M_PRIME, MOVE_E, MOVE_E_PRIME, 
+    MOVE_S, MOVE_S_PRIME, MOVE_NONE 
+};
 
 enum FaceDir { POS_X=0, NEG_X, POS_Y, NEG_Y, POS_Z, NEG_Z };
 
@@ -56,8 +61,7 @@ const char* skyboxFS = R"(
     in vec3 TexCoords;
     uniform samplerCube skybox;
     void main() {    
-        vec3 envColor = texture(skybox, TexCoords).rgb;
-        envColor = envColor * 0.3; 
+        vec3 envColor = texture(skybox, TexCoords).rgb * 0.3;
         envColor = pow(envColor, vec3(1.0/2.2)); 
         FragColor = vec4(envColor, 1.0);
     }
@@ -104,14 +108,12 @@ const char* cubeFS = R"(
         }
         float F0 = 0.04; 
         float F = fresnelSchlick(max(dot(N, V), 0.0), F0);
-        float MAX_REFLECTION_LOD = 4.0; 
-        vec3 prefilteredColor = textureLod(uSkybox, R, uRoughness * MAX_REFLECTION_LOD).rgb; 
+        vec3 prefilteredColor = textureLod(uSkybox, R, uRoughness * 4.0).rgb; 
         vec3 specular = prefilteredColor * F * 1.5; 
-        vec3 irradiance = textureLod(uSkybox, N, MAX_REFLECTION_LOD).rgb;
+        vec3 irradiance = textureLod(uSkybox, N, 4.0).rgb;
         vec3 diffuse = irradiance * albedo * 1.2; 
         vec3 color = diffuse + specular;
-        float exposure = 1.0;
-        color = vec3(1.0) - exp(-color * exposure);
+        color = vec3(1.0) - exp(-color * 1.0);
         color = pow(color, vec3(1.0/2.2));   
         FragColor = vec4(color, 1.0);
     }
@@ -243,8 +245,6 @@ public:
     void draw() { glBindVertexArray(VAO); glDrawArrays(GL_TRIANGLES, 0, 36); glBindVertexArray(0); }
 };
 
-enum MoveType { MOVE_F, MOVE_F_PRIME, MOVE_B, MOVE_B_PRIME, MOVE_L, MOVE_L_PRIME, MOVE_R, MOVE_R_PRIME, MOVE_U, MOVE_U_PRIME, MOVE_D, MOVE_D_PRIME, MOVE_M, MOVE_M_PRIME, MOVE_E, MOVE_E_PRIME, MOVE_S, MOVE_S_PRIME, MOVE_NONE };
-
 struct Cubie {
     int x, y, z; std::array<glm::vec4, 6> stickers; bool isCenterFace; 
     Cubie(int px, int py, int pz) : x(px), y(py), z(pz) {
@@ -292,7 +292,67 @@ private:
         viewMatrix = glm::lookAt(camPos, glm::vec3(0,0,0), glm::vec3(0,1,0));
     }
 
-    MoveType mapKeyToMove(SDL_Keycode key, bool shiftPressed) { float angle = fmod(fmod(cameraRotY, 360.0f) + 360.0f, 360.0f); int orientation; if (angle >= 315.0f || angle < 45.0f) orientation = 0; else if (angle >= 45.0f && angle < 135.0f) orientation = 1; else if (angle >= 135.0f && angle < 225.0f) orientation = 2; else orientation = 3; bool topView = cameraRotX > 45.0f; bool bottomView = cameraRotX < -45.0f; static const MoveType horizontalMap[4][6] = { {MOVE_F, MOVE_B, MOVE_R, MOVE_L, MOVE_U, MOVE_D}, {MOVE_L, MOVE_R, MOVE_F, MOVE_B, MOVE_U, MOVE_D}, {MOVE_B, MOVE_F, MOVE_L, MOVE_R, MOVE_U, MOVE_D}, {MOVE_R, MOVE_L, MOVE_B, MOVE_F, MOVE_U, MOVE_D}, }; static const MoveType topViewMap[4][6] = { {MOVE_U, MOVE_D, MOVE_R, MOVE_L, MOVE_B, MOVE_F}, {MOVE_U, MOVE_D, MOVE_F, MOVE_B, MOVE_R, MOVE_L}, {MOVE_U, MOVE_D, MOVE_L, MOVE_R, MOVE_F, MOVE_B}, {MOVE_U, MOVE_D, MOVE_B, MOVE_F, MOVE_L, MOVE_R}, }; static const MoveType bottomViewMap[4][6] = { {MOVE_D, MOVE_U, MOVE_R, MOVE_L, MOVE_F, MOVE_B}, {MOVE_D, MOVE_U, MOVE_B, MOVE_F, MOVE_R, MOVE_L}, {MOVE_D, MOVE_U, MOVE_L, MOVE_R, MOVE_B, MOVE_F}, {MOVE_D, MOVE_U, MOVE_F, MOVE_B, MOVE_L, MOVE_R}, }; int relativeKey = -1; switch (key) { case SDLK_f: relativeKey = 0; break; case SDLK_b: relativeKey = 1; break; case SDLK_r: relativeKey = 2; break; case SDLK_l: relativeKey = 3; break; case SDLK_u: relativeKey = 4; break; case SDLK_d: relativeKey = 5; break; case SDLK_m: return shiftPressed ? MOVE_M_PRIME : MOVE_M; case SDLK_e: return shiftPressed ? MOVE_E_PRIME : MOVE_E; case SDLK_s: return shiftPressed ? MOVE_S_PRIME : MOVE_S; default: return MOVE_NONE; } if (relativeKey == -1) return MOVE_NONE; MoveType baseMove; if (topView) baseMove = topViewMap[orientation][relativeKey]; else if (bottomView) baseMove = bottomViewMap[orientation][relativeKey]; else baseMove = horizontalMap[orientation][relativeKey]; if (shiftPressed) return static_cast<MoveType>(static_cast<int>(baseMove) + 1); return baseMove; }
+    MoveType mapKeyToMove(SDL_Keycode key, bool shiftPressed) { 
+        float angle = fmod(fmod(cameraRotY, 360.0f) + 360.0f, 360.0f); 
+        int orientation; 
+        if (angle >= 315.0f || angle < 45.0f) orientation = 0;       
+        else if (angle >= 45.0f && angle < 135.0f) orientation = 1;  
+        else if (angle >= 135.0f && angle < 225.0f) orientation = 2; 
+        else orientation = 3;                                        
+        
+        bool topView = cameraRotX > 45.0f; 
+        bool bottomView = cameraRotX < -45.0f;
+
+        // FIXED MAPS: 0=Red(+Z), 1=Green(+X), 2=Orange(-Z), 3=Blue(-X)
+        static const MoveType horizontalMap[4][6] = { 
+            // 0: Red (+Z) -> Front is F
+            {MOVE_F, MOVE_B, MOVE_R, MOVE_L, MOVE_U, MOVE_D}, 
+            // 1: Green (+X) -> Front is R, Back is L, Right is B, Left is F
+            {MOVE_R, MOVE_L, MOVE_B, MOVE_F, MOVE_U, MOVE_D}, 
+            // 2: Orange (-Z) -> Front is B, Back is F, Right is L, Left is R
+            {MOVE_B, MOVE_F, MOVE_L, MOVE_R, MOVE_U, MOVE_D}, 
+            // 3: Blue (-X) -> Front is L, Back is R, Right is F, Left is B
+            {MOVE_L, MOVE_R, MOVE_F, MOVE_B, MOVE_U, MOVE_D}, 
+        };
+
+        static const MoveType topViewMap[4][6] = { 
+            {MOVE_U, MOVE_D, MOVE_R, MOVE_L, MOVE_B, MOVE_F}, 
+            {MOVE_U, MOVE_D, MOVE_B, MOVE_F, MOVE_L, MOVE_R}, 
+            {MOVE_U, MOVE_D, MOVE_L, MOVE_R, MOVE_F, MOVE_B}, 
+            {MOVE_U, MOVE_D, MOVE_F, MOVE_B, MOVE_R, MOVE_L}, 
+        };
+
+        static const MoveType bottomViewMap[4][6] = { 
+            {MOVE_D, MOVE_U, MOVE_R, MOVE_L, MOVE_F, MOVE_B}, 
+            {MOVE_D, MOVE_U, MOVE_B, MOVE_F, MOVE_R, MOVE_L}, 
+            {MOVE_D, MOVE_U, MOVE_L, MOVE_R, MOVE_B, MOVE_F}, 
+            {MOVE_D, MOVE_U, MOVE_F, MOVE_B, MOVE_L, MOVE_R}, 
+        };
+
+        int relativeKey = -1; 
+        switch (key) { 
+            case SDLK_f: relativeKey = 0; break; 
+            case SDLK_b: relativeKey = 1; break; 
+            case SDLK_r: relativeKey = 2; break; 
+            case SDLK_l: relativeKey = 3; break; 
+            case SDLK_u: relativeKey = 4; break; 
+            case SDLK_d: relativeKey = 5; break; 
+            case SDLK_m: return shiftPressed ? MOVE_M_PRIME : MOVE_M; 
+            case SDLK_e: return shiftPressed ? MOVE_E_PRIME : MOVE_E; 
+            case SDLK_s: return shiftPressed ? MOVE_S_PRIME : MOVE_S; 
+            default: return MOVE_NONE; 
+        } 
+
+        if (relativeKey == -1) return MOVE_NONE; 
+
+        MoveType baseMove; 
+        if (topView) baseMove = topViewMap[orientation][relativeKey]; 
+        else if (bottomView) baseMove = bottomViewMap[orientation][relativeKey]; 
+        else baseMove = horizontalMap[orientation][relativeKey]; 
+
+        if (shiftPressed) return static_cast<MoveType>(static_cast<int>(baseMove) + 1); 
+        return baseMove; 
+    }
 
     void performInstantMove(MoveType move) {
         int axis = 0; int dir = 1; 
@@ -313,8 +373,7 @@ public:
 
     void scramble() {
         if (animating || autoSolving) return;
-        // FIX: Do NOT clear history. Just append new random moves.
-        // This ensures subsequent scrambles are all recorded.
+        // Keep adding to history
         for (int i = 0; i < 20; i++) {
             int r = rand() % 18;
             MoveType m = static_cast<MoveType>(r);
@@ -323,20 +382,13 @@ public:
         }
     }
     
-    // The "Solve" function users expect
     void solve() {
         if (animating || autoSolving || history.empty()) return;
-        
         autoSolving = true;
         moveQueue.clear();
-        
-        // Reverse the entire history to return to solved state
         for (int i = history.size() - 1; i >= 0; i--) {
             MoveType m = history[i];
-            MoveType inv;
-            // Invert the move (Even is Normal, Odd is Prime)
-            if (m % 2 == 0) inv = static_cast<MoveType>(m + 1); // F -> F'
-            else inv = static_cast<MoveType>(m - 1); // F' -> F
+            MoveType inv = (m % 2 == 0) ? static_cast<MoveType>(m + 1) : static_cast<MoveType>(m - 1);
             moveQueue.push_back(inv);
         }
         history.clear();
@@ -345,24 +397,16 @@ public:
     void startMove(MoveType move) { 
         if (animating) return; 
         animating = true; currentMove = move; animationAngle = 0; animatingCubies.clear(); originalPositions.clear(); 
-        
-        // FIX: Record MANUAL moves too, so the solver can undo them
-        if (!autoSolving) {
-            history.push_back(move);
-        }
-
+        if (!autoSolving) history.push_back(move); // Track manual moves
         switch (move) { case MOVE_F: rotAxis=2; rotDirection=-1; break; case MOVE_F_PRIME: rotAxis=2; rotDirection=1; break; case MOVE_B: rotAxis=2; rotDirection=1; break; case MOVE_B_PRIME: rotAxis=2; rotDirection=-1; break; case MOVE_L: rotAxis=0; rotDirection=1; break; case MOVE_L_PRIME: rotAxis=0; rotDirection=-1; break; case MOVE_R: rotAxis=0; rotDirection=-1; break; case MOVE_R_PRIME: rotAxis=0; rotDirection=1; break; case MOVE_U: rotAxis=1; rotDirection=-1; break; case MOVE_U_PRIME: rotAxis=1; rotDirection=1; break; case MOVE_D: rotAxis=1; rotDirection=1; break; case MOVE_D_PRIME: rotAxis=1; rotDirection=-1; break; case MOVE_M: rotAxis=0; rotDirection=1; break; case MOVE_M_PRIME: rotAxis=0; rotDirection=-1; break; case MOVE_E: rotAxis=1; rotDirection=1; break; case MOVE_E_PRIME: rotAxis=1; rotDirection=-1; break; case MOVE_S: rotAxis=2; rotDirection=-1; break; case MOVE_S_PRIME: rotAxis=2; rotDirection=1; break; default: animating = false; return; } for (size_t i = 0; i < cubies.size(); i++) { bool sel = false; int x = cubies[i].x, y = cubies[i].y, z = cubies[i].z; switch (move) { case MOVE_F: case MOVE_F_PRIME: sel = (z == 1); break; case MOVE_B: case MOVE_B_PRIME: sel = (z == -1); break; case MOVE_L: case MOVE_L_PRIME: sel = (x == -1); break; case MOVE_R: case MOVE_R_PRIME: sel = (x == 1); break; case MOVE_U: case MOVE_U_PRIME: sel = (y == 1); break; case MOVE_D: case MOVE_D_PRIME: sel = (y == -1); break; case MOVE_M: case MOVE_M_PRIME: sel = (x == 0); break; case MOVE_E: case MOVE_E_PRIME: sel = (y == 0); break; case MOVE_S: case MOVE_S_PRIME: sel = (z == 0); break; default: break; } if (sel) { animatingCubies.push_back(i); originalPositions.push_back({x, y, z}); } } }
     
     void update() { 
         if (!animating && !moveQueue.empty()) {
-            MoveType m = moveQueue.front();
-            moveQueue.pop_front();
-            startMove(m);
-            return;
+            MoveType m = moveQueue.front(); moveQueue.pop_front();
+            startMove(m); return;
         }
         if (moveQueue.empty()) autoSolving = false;
         if (!animating) return; 
-        
         float speed = autoSolving ? 25.0f : animationSpeed;
         animationAngle += speed; 
         if (animationAngle >= targetAngle) { 
@@ -388,6 +432,29 @@ public:
     void rotateCamera(int dx, int dy) { cameraRotY += dx * 0.5f; cameraRotX += dy * 0.5f; cameraRotX = glm::clamp(cameraRotX, -89.0f, 89.0f); updateMatrices(); }
     void zoom(int dir) { cameraDistance -= dir * 1.0f; cameraDistance = glm::clamp(cameraDistance, 6.0f, 25.0f); updateMatrices(); }
     void handleKeyPress(SDL_Keycode key, bool shift) { MoveType move = mapKeyToMove(key, shift); if (move != MOVE_NONE) startMove(move); }
+    
+    // INPUT HANDLING INSIDE CLASS
+    void handleInput(SDL_Event& e, bool& rDown, bool& lDown, int& lx, int& ly, int& cx, int& cy, int& pc, int& pf, bool& dc) {
+        if(e.type==SDL_KEYDOWN){
+            if(e.key.keysym.sym==SDLK_SPACE) scramble();
+            else if(e.key.keysym.sym==SDLK_c) solve();
+            else if(e.key.keysym.sym!=SDLK_ESCAPE) {
+                bool s=(e.key.keysym.mod&KMOD_SHIFT);
+                handleKeyPress(e.key.keysym.sym, s);
+            }
+        }
+        else if(e.type==SDL_MOUSEBUTTONDOWN){ if(e.button.button==3){rDown=true;lx=e.button.x;ly=e.button.y;} else if(e.button.button==1){lDown=true;cx=e.button.x;cy=e.button.y;dc=false; if(!pickCubie(cx,cy,pc,pf)) pc=-1;}}
+        else if(e.type==SDL_MOUSEBUTTONUP){if(e.button.button==3)rDown=false;else if(e.button.button==1)lDown=false;}
+        else if(e.type==SDL_MOUSEMOTION){
+            if(rDown){rotateCamera(e.motion.x-lx,e.motion.y-ly);lx=e.motion.x;ly=e.motion.y;}
+            else if(lDown&&pc!=-1&&!dc){ int dx=e.motion.x-cx,dy=e.motion.y-cy; if(dx*dx+dy*dy>MIN_DRAG_DISTANCE*MIN_DRAG_DISTANCE){
+                MoveType m=getMoveFromDrag(pf,pc,dx,dy); if(m!=MOVE_NONE){startMove(m); dc=true;}
+            }}
+        } else if(e.type==SDL_MOUSEWHEEL) {
+            zoom(e.wheel.y);
+        }
+    }
+
     bool pickCubie(int mouseX, int mouseY, int& outIndex, int& outFace) { updateMatrices(); glm::vec4 viewport = glm::vec4(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT); glm::vec3 winCoords = glm::vec3(mouseX, WINDOW_HEIGHT - mouseY, 0.0f); glm::vec3 nearPos = glm::unProject(glm::vec3(winCoords.x, winCoords.y, 0.0f), viewMatrix, projMatrix, viewport); glm::vec3 farPos = glm::unProject(glm::vec3(winCoords.x, winCoords.y, 1.0f), viewMatrix, projMatrix, viewport); glm::vec3 rayDir = glm::normalize(farPos - nearPos); glm::vec3 rayOrigin = nearPos; float minT = 1000.0f; int bestIdx = -1; int bestFace = -1; for(size_t i=0; i<cubies.size(); ++i) { glm::vec3 pos(cubies[i].x, cubies[i].y, cubies[i].z); for(int f=0; f<6; ++f) { if(cubies[i].stickers[f] == BLACK_PLASTIC) continue; glm::vec3 normal(0); if(f==POS_X) normal.x=1; else if(f==NEG_X) normal.x=-1; else if(f==POS_Y) normal.y=1; else if(f==NEG_Y) normal.y=-1; else if(f==POS_Z) normal.z=1; else if(f==NEG_Z) normal.z=-1; glm::vec3 faceCenter = pos + normal * 0.5f; float denom = glm::dot(normal, rayDir); if(fabs(denom) < 1e-6) continue; float t = glm::dot(faceCenter - rayOrigin, normal) / denom; if(t < 0 || t > minT) continue; glm::vec3 hitPoint = rayOrigin + t * rayDir; glm::vec3 localHit = hitPoint - pos; bool hit = false; float s = 0.5f; if (f < 2) hit = (fabs(localHit.y) <= s && fabs(localHit.z) <= s); else if (f < 4) hit = (fabs(localHit.x) <= s && fabs(localHit.z) <= s); else hit = (fabs(localHit.x) <= s && fabs(localHit.y) <= s); if(hit) { minT = t; bestIdx = i; bestFace = f; } } } if (bestIdx != -1) { outIndex = bestIdx; outFace = bestFace; return true; } return false; }
     MoveType getMoveFromDrag(int faceDir, int cubieIndex, int dragDX, int dragDY) { if (cubieIndex < 0 || cubieIndex >= (int)cubies.size()) return MOVE_NONE; glm::mat4 invView = glm::inverse(viewMatrix); glm::vec3 camRight = glm::vec3(invView[0]); glm::vec3 camUp = glm::vec3(invView[1]); glm::vec3 worldDrag = (float)dragDX * camRight - (float)dragDY * camUp; float dragH = 0, dragV = 0; switch (faceDir) { case POS_Z: dragH = worldDrag.x; dragV = worldDrag.y; break; case NEG_Z: dragH = -worldDrag.x; dragV = worldDrag.y; break; case POS_X: dragH = -worldDrag.z; dragV = worldDrag.y; break; case NEG_X: dragH = worldDrag.z; dragV = worldDrag.y; break; case POS_Y: dragH = worldDrag.x; dragV = -worldDrag.z; break; case NEG_Y: dragH = worldDrag.x; dragV = worldDrag.z; break; } bool horizontal = fabs(dragH) > fabs(dragV); int dirH = (dragH > 0) ? 1 : -1; int dirV = (dragV > 0) ? 1 : -1; int cx = cubies[cubieIndex].x, cy = cubies[cubieIndex].y, cz = cubies[cubieIndex].z; if (faceDir == POS_Z || faceDir == NEG_Z) { if (horizontal) { if (cy == 1) return (dirH > 0) ? MOVE_U_PRIME : MOVE_U; if (cy == -1) return (dirH > 0) ? MOVE_D : MOVE_D_PRIME; return (dirH > 0) ? MOVE_E : MOVE_E_PRIME; } else { MoveType m; if (cx == 1) m = (dirV > 0) ? MOVE_R : MOVE_R_PRIME; else if (cx == -1) m = (dirV > 0) ? MOVE_L_PRIME : MOVE_L; else m = (dirV > 0) ? MOVE_M_PRIME : MOVE_M; if (faceDir == NEG_Z) { if (m == MOVE_R) m = MOVE_R_PRIME; else if (m == MOVE_R_PRIME) m = MOVE_R; if (m == MOVE_L) m = MOVE_L_PRIME; else if (m == MOVE_L_PRIME) m = MOVE_L; if (m == MOVE_M) m = MOVE_M_PRIME; else if (m == MOVE_M_PRIME) m = MOVE_M; } return m; } } else if (faceDir == POS_X || faceDir == NEG_X) { if (horizontal) { if (cy == 1) return (dirH > 0) ? MOVE_U_PRIME : MOVE_U; if (cy == -1) return (dirH > 0) ? MOVE_D : MOVE_D_PRIME; return (dirH > 0) ? MOVE_E : MOVE_E_PRIME; } else { MoveType m; if (cz == 1) m = (dirV > 0) ? MOVE_F_PRIME : MOVE_F; else if (cz == -1) m = (dirV > 0) ? MOVE_B : MOVE_B_PRIME; else m = (dirV > 0) ? MOVE_S_PRIME : MOVE_S; if (faceDir == NEG_X) { if (m == MOVE_F) m = MOVE_F_PRIME; else if (m == MOVE_F_PRIME) m = MOVE_F; if (m == MOVE_B) m = MOVE_B_PRIME; else if (m == MOVE_B_PRIME) m = MOVE_B; if (m == MOVE_S) m = MOVE_S_PRIME; else if (m == MOVE_S_PRIME) m = MOVE_S; } return m; } } else { if (horizontal) { MoveType m; if (cz == 1) m = (dirH > 0) ? MOVE_F : MOVE_F_PRIME; else if (cz == -1) m = (dirH > 0) ? MOVE_B_PRIME : MOVE_B; else m = (dirH > 0) ? MOVE_S : MOVE_S_PRIME; if (faceDir == NEG_Y) { if (m == MOVE_F) m = MOVE_F_PRIME; else if (m == MOVE_F_PRIME) m = MOVE_F; if (m == MOVE_B) m = MOVE_B_PRIME; else if (m == MOVE_B_PRIME) m = MOVE_B; if (m == MOVE_S) m = MOVE_S_PRIME; else if (m == MOVE_S_PRIME) m = MOVE_S; } return m; } else { MoveType m; if (cx == 1) m = (dirV > 0) ? MOVE_R : MOVE_R_PRIME; else if (cx == -1) m = (dirV > 0) ? MOVE_L_PRIME : MOVE_L; else m = (dirV > 0) ? MOVE_M_PRIME : MOVE_M; if (faceDir == NEG_Y) { if (m == MOVE_R) m = MOVE_R_PRIME; else if (m == MOVE_R_PRIME) m = MOVE_R; if (m == MOVE_L) m = MOVE_L_PRIME; else if (m == MOVE_L_PRIME) m = MOVE_L; if (m == MOVE_M) m = MOVE_M_PRIME; else if (m == MOVE_M_PRIME) m = MOVE_M; } return m; } } }
     void getMatrices(glm::mat4& v, glm::mat4& p) { v = viewMatrix; p = projMatrix; }
@@ -401,7 +468,7 @@ int main(int argc, char* argv[]) {
     SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
     SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 1); SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 4);
 
-    SDL_Window* window = SDL_CreateWindow("Rubiks PBR (Fixed Solver)", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, WINDOW_WIDTH, WINDOW_HEIGHT, SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN);
+    SDL_Window* window = SDL_CreateWindow("Rubiks PBR (Fixed Input)", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, WINDOW_WIDTH, WINDOW_HEIGHT, SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN);
     if (!window) { std::cerr << "Window Create Failed: " << SDL_GetError() << std::endl; return 1; }
     
     SDL_GLContext context = SDL_GL_CreateContext(window);
@@ -428,31 +495,7 @@ int main(int argc, char* argv[]) {
     while (running) {
         while (SDL_PollEvent(&event)) {
             if (event.type == SDL_QUIT) running = false;
-            else if (event.type == SDL_KEYDOWN) {
-                if (event.key.keysym.sym == SDLK_ESCAPE) running = false;
-                if (event.key.keysym.sym == SDLK_SPACE) cube.scramble();
-                else if (event.key.keysym.sym == SDLK_c) cube.solve(); // CHANGED TO C
-                else cube.handleKeyPress(event.key.keysym.sym, (event.key.keysym.mod & KMOD_SHIFT));
-            }
-            else if (event.type == SDL_MOUSEBUTTONDOWN) {
-                if (event.button.button == SDL_BUTTON_RIGHT) { rightDown = true; lastX = event.button.x; lastY = event.button.y; }
-                else if (event.button.button == SDL_BUTTON_LEFT) { leftDown = true; clickStartX = event.button.x; clickStartY = event.button.y; draggingCube = false; if (!cube.pickCubie(clickStartX, clickStartY, pickedCubie, pickedFace)) pickedCubie = -1; }
-            }
-            else if (event.type == SDL_MOUSEBUTTONUP) {
-                if (event.button.button == SDL_BUTTON_RIGHT) rightDown = false;
-                if (event.button.button == SDL_BUTTON_LEFT) { leftDown = false; draggingCube = false; pickedCubie = -1; }
-            }
-            else if (event.type == SDL_MOUSEMOTION) {
-                if (rightDown) { cube.rotateCamera(event.motion.x - lastX, event.motion.y - lastY); lastX = event.motion.x; lastY = event.motion.y; }
-                else if (leftDown && pickedCubie != -1) {
-                    int dx = event.motion.x - clickStartX; int dy = event.motion.y - clickStartY;
-                    if (!draggingCube && (dx*dx + dy*dy > MIN_DRAG_DISTANCE*MIN_DRAG_DISTANCE)) {
-                         MoveType move = cube.getMoveFromDrag(pickedFace, pickedCubie, dx, dy);
-                         if (move != MOVE_NONE) { cube.startMove(move); draggingCube = true; }
-                    }
-                }
-            }
-            else if (event.type == SDL_MOUSEWHEEL) cube.zoom(event.wheel.y);
+            else cube.handleInput(event, rightDown, leftDown, lastX, lastY, clickStartX, clickStartY, pickedCubie, pickedFace, draggingCube);
         }
 
         cube.update();
